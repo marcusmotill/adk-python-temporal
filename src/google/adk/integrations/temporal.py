@@ -15,6 +15,7 @@
 """Temporal integration helpers for ADK."""
 
 import functools
+import inspect
 from typing import Any, AsyncGenerator, Callable, Optional, List
 
 from temporalio import workflow, activity
@@ -39,17 +40,21 @@ def activity_as_tool(
     
     # We create a wrapper that delegates to workflow.execute_activity
     async def tool_wrapper(*args, **kwargs) -> Any:
-        # Note: ADK tools usually pass args/kwargs strictly matched to signature.
-        # Activities expect positional args in a list if 'args' is used.
-        # If the tool signature matches the activity signature, we can pass args.
-        # It's safer if activity takes Pydantic models or simple types.
-        
-        # We assume strict positional argument mapping for now, or simplistic kwargs handling if supported.
-        # Temporal Python SDK typically invokes activities with `args=[...]`.
-        
+        # Bind arguments to the activity signature to ensure correct order/mapping.
+        try:
+            sig = inspect.signature(activity_def)
+            bound_args = sig.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+            activity_args = [bound_args.arguments[p] for p in sig.parameters]
+        except (TypeError, ValueError):
+            # Fallback for built-ins or other complex callables where binding may fail
+            # or if arguments don't match signature (e.g. simpler invocation).
+            # Temporal Python SDK typically invokes activities with `args=[...]`.
+            activity_args = list(args) + list(kwargs.values()) if kwargs else list(args)
+
         return await workflow.execute_activity(
             activity_def,
-            args=list(args) + list(kwargs.values()) if kwargs else list(args),
+            args=activity_args,
             **activity_options
         )
 
@@ -64,7 +69,6 @@ def activity_as_tool(
 
     # CRITICAL: Copy signature so FunctionTool can generate correct parameters schema
     try:
-        import inspect
         tool_wrapper.__signature__ = inspect.signature(activity_def)
     except Exception:
         pass  # Fallback if signature copy fails (e.g. builtins)

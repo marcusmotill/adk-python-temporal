@@ -221,7 +221,6 @@ class MultiAgentWorkflow:
         # Turn 2: Trigger Handoff
         logger.info("--- Turn 2: Trigger Handoff ---")
         handoff_response_text = ""
-        last_author = ""
         async with Aclosing(runner.run_async(
             user_id=session.user_id,
             session_id=session.id,
@@ -229,7 +228,6 @@ class MultiAgentWorkflow:
         )) as agen:
             async for event in agen:
                 logger.info(f"Event Author: {event.author} | Actions: {event.actions}")
-                last_author = event.author
                 if event.content and event.content.parts:
                     for part in event.content.parts:
                         if part.text: handoff_response_text += part.text
