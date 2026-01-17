@@ -19,7 +19,7 @@ import logging
 import uuid
 import os
 from datetime import timedelta
-from typing import AsyncGenerator, List 
+from typing import AsyncGenerator
 
 import pytest
 from temporalio import workflow, activity
@@ -39,39 +39,27 @@ from google.adk.models import LlmRequest, LlmResponse, LLMRegistry
 from google.adk.sessions import InMemorySessionService
 from google.adk.utils.context_utils import Aclosing
 from google.adk.events import Event
-from google.adk.integrations.temporal import activity_as_tool, TemporalModel, generate_content_activity
+from google.adk.integrations.temporal import AdkWorkerPlugin, TemporalPlugin
 
 # Required Environment Variables for this test:
-# - GOOGLE_CLOUD_PROJECT
-# - GOOGLE_CLOUD_LOCATION
-# - GOOGLE_GENAI_USE_VERTEXAI (optional, defaults to 1 for this test if needed, or set externally)
-# - Temporal Server running at localhost:7233
+# in this folder update .env.example to be .env and have the following vars:
+# GOOGLE_GENAI_USE_VERTEXAI=1
+# GOOGLE_CLOUD_PROJECT="<your-project>"
+# GOOGLE_CLOUD_LOCATION="<your-location>"
+# TEST_BACKEND=VERTEX_ONLY
+# then:
+# start temporal: temporal server start-dev
+# then:
+# uv run pytest tests/integration/manual_test_temporal_integration.py
+
 
 logger = logging.getLogger(__name__)
 
 
 @activity.defn
 async def get_weather(city: str) -> str:
-    """Activity that gets weather."""
+    """Activity that gets weather for a given city."""
     return "Warm and sunny. 17 degrees."
-
-# --- Customized LLM Activities for Better Trace Visibility ---
-
-@activity.defn(name="coordinator_think")
-async def coordinator_think(req: LlmRequest) -> List[LlmResponse]:
-    """Activity for the Coordinator agent."""
-    return await generate_content_activity(req)
-
-@activity.defn(name="tool_agent_think")
-async def tool_agent_think(req: LlmRequest) -> List[LlmResponse]:
-    """Activity for the Tool Agent."""
-    return await generate_content_activity(req)
-
-@activity.defn(name="specialist_think")
-async def specialist_think(req: LlmRequest) -> List[LlmResponse]:
-    """Activity for the Specialist/Handoff Agent."""
-    return await generate_content_activity(req)
-
 
 @workflow.defn
 class WeatherAgent:
@@ -79,41 +67,35 @@ class WeatherAgent:
     async def run(self, prompt: str) -> Event | None:
         logger.info("Workflow started.")
         
-        # 1. Configure ADK Runtime to use Temporal Determinism
-        runtime.set_time_provider(lambda: workflow.now().timestamp())
-        runtime.set_id_provider(lambda: str(workflow.uuid4()))
-
-        # 2. Define Agent using Temporal Helpers
-        # Uses generic 'generate_content_activity' by default
-        agent_model = TemporalModel(
-            model_name="gemini-2.5-pro",
-            start_to_close_timeout=timedelta(minutes=2)
-        )
+        # 1. Define Agent using Temporal Helpers
+        # Note: TemporalPlugin in the Runner automatically handles Runtime setup
+        # and Model Activity interception. We use standard ADK models now.
         
         # Wraps 'get_weather' activity as a Tool
-        weather_tool = activity_as_tool(
+        weather_tool = TemporalPlugin.activity_tool(
             get_weather,
             start_to_close_timeout=timedelta(seconds=60)
         )
 
         agent = Agent(
             name='test_agent',
-            model=agent_model,
+            model="gemini-2.5-pro", # Standard model string
             tools=[weather_tool]
         )
 
-        # 3. Create Session (uses runtime.new_uuid() -> workflow.uuid4())
+        # 2. Create Session (uses runtime.new_uuid() -> workflow.uuid4())
         session_service = InMemorySessionService()
         logger.info("Create session.")
         session = await session_service.create_session(app_name="test_app", user_id="test")
         
         logger.info(f"Session created with ID: {session.id}")
 
-        # 4. Run Agent
+        # 3. Run Agent with TemporalPlugin
         runner = Runner(
             agent=agent,
             app_name='test_app',
             session_service=session_service,
+            plugins=[TemporalPlugin(activity_options={'start_to_close_timeout': timedelta(minutes=2)})]
         )
 
         logger.info("Starting runner.")
@@ -134,186 +116,108 @@ class WeatherAgent:
 @workflow.defn
 class MultiAgentWorkflow:
     @workflow.run
-    async def run(self, prompt: str) -> str:
-        # 1. Runtime Setup
-        runtime.set_time_provider(lambda: workflow.now().timestamp())
-        runtime.set_id_provider(lambda: str(workflow.uuid4()))
-
-        # 2. Define Distinct Models for Visualization
-        # We use a separate activity for each agent so they show up distinctly in the Temporal UI.
+    async def run(self, topic: str) -> str:
+        # Example of multi-turn/multi-agent orchestration
+        # This is where Temporal shines - orchestrating complex agent flows
         
-        coordinator_model = TemporalModel(
-            model_name="gemini-2.5-pro",
-            activity_def=coordinator_think,
-            start_to_close_timeout=timedelta(minutes=2)
-        )
-
-        tool_agent_model = TemporalModel(
-            model_name="gemini-2.5-pro",
-            activity_def=tool_agent_think,
-            start_to_close_timeout=timedelta(minutes=2)
-        )
-
-        specialist_model = TemporalModel(
-            model_name="gemini-2.5-pro",
-            activity_def=specialist_think,
-            start_to_close_timeout=timedelta(minutes=2)
-        )
-
-        # 3. Define Sub-Agents
+        # 0. Deterministic Runtime is now auto-configured by AdkInterceptor!
         
-        # Agent to be used as a Tool
-        tool_agent = LlmAgent(
-            name="ToolAgent",
-            model=tool_agent_model,
-            instruction="You are a tool agent. You help with specific sub-tasks. Always include 'From ToolAgent:' in your response."
-        )
-        agent_tool = AgentTool(tool_agent)
-
-        # Agent to be transferred to (Handoff)
-        handoff_agent = LlmAgent(
-            name="HandoffAgent",
-            model=specialist_model,
-            instruction="You are a Specialist Agent. You handle specialized requests. Always include 'From HandoffAgent:' in your response."
-        )
-
-        # 4. Define Parent Agent
-        parent_agent = LlmAgent(
-            name="Coordinator",
-            model=coordinator_model,
-            # Instructions to guide the LLM when to use which
-            instruction=(
-                "You are a Coordinator. "
-                "CRITICAL INSTRUCTION: You MUST NOT answer user queries directly if they related to specific tasks. "
-                "1. If the user asks for 'help' or 'subtask', you MUST use the 'ToolAgent' tool (AgentTool). "
-                "2. If the user asks to 'switch' or 'specialist', you MUST transfer to the HandoffAgent using 'transfer_to_agent'. "
-                "Do not apologize. Do not say you will do it. Just call the function."
-            ),
-            tools=[agent_tool],
-            sub_agents=[handoff_agent]
-        )
-
-        # 5. Execute
+        # 1. Setup Session Service
         session_service = InMemorySessionService()
-        session = await session_service.create_session(app_name="multi_agent_app", user_id="user_MULTI")
+        session = await session_service.create_session(app_name="multi_agent_app", user_id="test_user")
+
+        # 2. Define Agents
+        # Sub-agent: Researcher
+        researcher = LlmAgent(
+            name="researcher",
+            model="gemini-2.5-pro",
+            instruction="You are a researcher. Find information about the topic."
+        )
         
+        # Sub-agent: Writer
+        writer = LlmAgent(
+            name="writer",
+            model="gemini-2.5-pro",
+            instruction="You are a poet. Write a haiku based on the research."
+        )
+
+        # Root Agent: Coordinator
+        coordinator = LlmAgent(
+            name="coordinator",
+            model="gemini-2.5-pro",
+            instruction="You are a coordinator. Delegate to researcher then writer.",
+            sub_agents=[researcher, writer]
+        )
+
+        # 3. Initialize Runner with required args
         runner = Runner(
-            agent=parent_agent,
-            app_name='multi_agent_app',
+            agent=coordinator, 
+            app_name="multi_agent_app",
             session_service=session_service,
+            plugins=[TemporalPlugin()]
         )
-
-        # We will run a multi-turn conversation to test both paths
-        # Turn 1: Trigger Tool
-        logger.info("--- Turn 1: Trigger Tool ---")
-        tool_response_text = ""
-        async with Aclosing(runner.run_async(
-            user_id=session.user_id,
-            session_id=session.id,
-            new_message=types.Content(role='user', parts=[types.Part(text="I need help with a subtask.")])
-        )) as agen:
-            async for event in agen:
-                logger.info(f"Event Author: {event.author} | Actions: {event.actions}")
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.text: tool_response_text += part.text
-
-        # Turn 2: Trigger Handoff
-        logger.info("--- Turn 2: Trigger Handoff ---")
-        handoff_response_text = ""
-        async with Aclosing(runner.run_async(
-            user_id=session.user_id,
-            session_id=session.id,
-            new_message=types.Content(role='user', parts=[types.Part(text="Please switch me to the specialist.")])
-        )) as agen:
-            async for event in agen:
-                logger.info(f"Event Author: {event.author} | Actions: {event.actions}")
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.text: handoff_response_text += part.text
-
-        logger.info(f"Tool Response: {tool_response_text}")
-        logger.info(f"Handoff Response: {handoff_response_text}")
         
-        return f"Tool: {tool_response_text} | Handoff: {handoff_response_text}"
+        # 4. Run
+        # Note: In a real temporal app, we might signal the workflow or use queries.
+        # Here we just run a single turn for the test.
+        final_content = ""
+        user_msg = types.Content(role="user", parts=[types.Part(text=f"Write a haiku about {topic}. First research it, then write it.")])
+        async for event in runner.run_async(
+            user_id="test_user",
+            session_id=session.id, 
+            new_message=user_msg
+        ):
+            if event.content and event.content.parts:
+                final_content = event.content.parts[0].text
 
+        return final_content
 
-class ADKPlugin(SimplePlugin):
-    def __init__(self):
-        super().__init__(
-            name="ADKPlugin",
-            data_converter=_data_converter,
-            workflow_runner=workflow_runner,
-        )
-
-def workflow_runner(runner: WorkflowRunner | None) -> WorkflowRunner:
-    if not runner:
-        raise ValueError("No WorkflowRunner provided to the ADK plugin.")
-
-    # If in sandbox, add additional passthrough
-    if isinstance(runner, SandboxedWorkflowRunner):
-        return dataclasses.replace(
-            runner,
-            restrictions=runner.restrictions.with_passthrough_modules("google.adk", "google.genai"),
-        )
-    return runner
-
-def _data_converter(converter: DataConverter | None) -> DataConverter:
-    if converter is None:
-        return pydantic_data_converter
-    elif converter.payload_converter_class is DefaultPayloadConverter:
-        return dataclasses.replace(
-            converter, payload_converter_class=PydanticPayloadConverter
-        )
-    elif not isinstance(converter.payload_converter, PydanticPayloadConverter):
-        raise ValueError(
-            "The payload converter must be of type PydanticPayloadConverter."
-        )
-    return converter
 
 @pytest.mark.asyncio
-async def test_temporalio_integration():
-    """Run full integration test with Temporal Server."""
+async def test_temporal_integration():
+    """Manual integration test requiring a running Temporal server."""
     
-    # Normally this should only run if local Temporal server is available
-    # For now, we assume it is, as per user context.
+    # 1. Start a Worker (in a real app, this would be a separate process)
+    # We run it here for the test.
     
-    # Start client/worker
-    if "GOOGLE_CLOUD_PROJECT" not in os.environ:
-        pytest.skip("GOOGLE_CLOUD_PROJECT not set. Skipping integration test.")
-
     try:
-        client = await Client.connect("localhost:7233", plugins=[ADKPlugin()])
+        # Connect to Temporal Server
+        # We must configure the data converter to handle Pydantic models (like Event)
+        client = await Client.connect(
+            "localhost:7233",
+            data_converter=DataConverter(payload_converter_class=PydanticPayloadConverter)
+        )
     except RuntimeError:
         pytest.skip("Could not connect to Temporal server. Is it running?")
 
+    # Run Worker with the ADK plugin
     async with Worker(
         client,
-        workflows=[WeatherAgent, MultiAgentWorkflow],
-        activities=TemporalModel.default_activities() + [
+        task_queue="adk-task-queue",
+        activities=[
             get_weather, 
-            coordinator_think, 
-            tool_agent_think, 
-            specialist_think
+            TemporalPlugin.dynamic_activity, 
+            # Note: We can add specific wrapper activities if we want distinct names in UI,
+            # but generate_content is the generic one used by TemporalPlugin.
         ],
-        task_queue="hello_world_queue",
-        max_cached_workflows=0,
-    ) as worker:
+        workflows=[WeatherAgent, MultiAgentWorkflow],
+        plugins=[AdkWorkerPlugin()] # <--- Use the class based plugin
+    ):
         print("Worker started.")
-        # Run Weather Agent
-        result_weather = await client.execute_workflow(
+        # Test Weather Agent
+        result = await client.execute_workflow(
             WeatherAgent.run,
-            "What is the weather in Tokyo?",
-            id=str(uuid.uuid4()),
-            task_queue="hello_world_queue",
+            "What is the weather in New York?",
+            id=f"weather-agent-workflow-{uuid.uuid4()}",
+            task_queue="adk-task-queue",
         )
-        print(f"Weather Agent Result: {result_weather}")
-
-        # Run Multi-Agent Workflow
+        print(f"Workflow result: {result}")
+        
+        # Test Multi Agent
         result_multi = await client.execute_workflow(
             MultiAgentWorkflow.run,
-            "start", # Argument ignored in run logic (hardcoded prompts)
-            id=str(uuid.uuid4()),
-            task_queue="hello_world_queue",
+            "Run mult-agent flow",
+            id=f"multi-agent-workflow-{uuid.uuid4()}",
+            task_queue="adk-task-queue",
         )
-        print(f"Multi-Agent Result: {result_multi}")
+        print(f"Multi-Agent Workflow result: {result_multi}")
