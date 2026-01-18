@@ -143,7 +143,7 @@ class TestTemporalIntegration(unittest.TestCase):
         callback_context.agent_name = "test-agent"
         callback_context.invocation_context.agent.model = "test-agent-model"
         
-        llm_request = LlmRequest(model=None, prompt="hi")
+        llm_request = LlmRequest(model="test-agent-model", prompt="hi")
         
         # Run callback
         loop = asyncio.new_event_loop()

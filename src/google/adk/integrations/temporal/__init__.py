@@ -139,6 +139,51 @@ class TemporalPlugin(BasePlugin):
         
         return wrapper
 
+    async def before_model_callback(
+        self, *, callback_context: CallbackContext, llm_request: LlmRequest
+    ) -> LlmResponse | None:
+        # Construct dynamic activity name for visibility
+        agent_name = callback_context.agent_name
+        activity_name = f"{agent_name}.generate_content"
+
+        # Execute with dynamic name
+        response_dicts = await workflow.execute_activity(
+            activity_name,
+            args=[llm_request],
+            **self.activity_options
+        )
+        
+        # Rehydrate LlmResponse objects safely
+        responses = []
+        for d in response_dicts:
+            try:
+                responses.append(LlmResponse.model_validate(d))
+            except Exception as e:
+                raise RuntimeError(f"Failed to deserialized LlmResponse from activity result: {e}") from e
+
+        # Simple consolidation: return the last complete response
+        return responses[-1] if responses else None
+
+
+
+
+class AdkWorkerPlugin(SimplePlugin):
+    """A Temporal Worker Plugin configured for ADK.
+    
+    This plugin configures:
+    1. Pydantic Payload Converter (required for ADK objects).
+    2. Sandbox Passthrough for `google.adk` and `google.genai`.
+    """
+
+    def __init__(self):
+        super().__init__(
+            name="adk_worker_plugin",
+            data_converter=self._configure_data_converter,
+            workflow_runner=self._configure_workflow_runner,
+            activities=[self.dynamic_activity],
+            worker_interceptors=[AdkInterceptor()]
+        )
+
     @staticmethod
     @activity.defn(dynamic=True)
     async def dynamic_activity(args: Sequence[RawValue]) -> Any:
@@ -147,8 +192,8 @@ class TemporalPlugin(BasePlugin):
         
         # Check if this is a generate_content call
         if activity_type.endswith(".generate_content") or activity_type == "google.adk.generate_content":
-             return await TemporalPlugin._handle_generate_content(args)
-             
+            return await AdkWorkerPlugin._handle_generate_content(args)
+                
         raise ValueError(f"Unknown dynamic activity: {activity_type}")
 
     @staticmethod
@@ -190,50 +235,6 @@ class TemporalPlugin(BasePlugin):
             r.model_dump(mode='json', by_alias=True) 
             for r in responses
         ]
-
-
-    async def before_model_callback(
-        self, *, callback_context: CallbackContext, llm_request: LlmRequest
-    ) -> LlmResponse | None:
-        # Construct dynamic activity name for visibility
-        agent_name = callback_context.agent_name
-        activity_name = f"{agent_name}.generate_content"
-
-        # Execute with dynamic name
-        response_dicts = await workflow.execute_activity(
-            activity_name,
-            args=[llm_request],
-            **self.activity_options
-        )
-        
-        # Rehydrate LlmResponse objects safely
-        responses = []
-        for d in response_dicts:
-            try:
-                responses.append(LlmResponse.model_validate(d))
-            except Exception as e:
-                raise RuntimeError(f"Failed to deserialized LlmResponse from activity result: {e}") from e
-
-        # Simple consolidation: return the last complete response
-        return responses[-1] if responses else None
-
-
-
-
-class AdkWorkerPlugin(SimplePlugin):
-    """A Temporal Worker Plugin configured for ADK.
-    
-    This plugin configures:
-    1. Pydantic Payload Converter (required for ADK objects).
-    2. Sandbox Passthrough for `google.adk` and `google.genai`.
-    """
-    def __init__(self):
-        super().__init__(
-            name="adk_worker_plugin",
-            data_converter=self._configure_data_converter,
-            workflow_runner=self._configure_workflow_runner,
-            worker_interceptors=[AdkInterceptor()]
-        )
 
     def _configure_data_converter(self, converter: DataConverter | None) -> DataConverter:
         if converter is None:

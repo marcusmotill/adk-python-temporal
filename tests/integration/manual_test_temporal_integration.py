@@ -154,7 +154,7 @@ class MultiAgentWorkflow:
             agent=coordinator, 
             app_name="multi_agent_app",
             session_service=session_service,
-            plugins=[TemporalPlugin()]
+            plugins=[TemporalPlugin(activity_options={'start_to_close_timeout': timedelta(minutes=2)})]
         )
         
         # 4. Run
@@ -196,12 +196,9 @@ async def test_temporal_integration():
         task_queue="adk-task-queue",
         activities=[
             get_weather, 
-            TemporalPlugin.dynamic_activity, 
-            # Note: We can add specific wrapper activities if we want distinct names in UI,
-            # but generate_content is the generic one used by TemporalPlugin.
         ],
         workflows=[WeatherAgent, MultiAgentWorkflow],
-        plugins=[AdkWorkerPlugin()] # <--- Use the class based plugin
+        plugins=[AdkWorkerPlugin()]
     ):
         print("Worker started.")
         # Test Weather Agent
