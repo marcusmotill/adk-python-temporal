@@ -65,12 +65,12 @@ def setup_deterministic_runtime():
         def _deterministic_time_provider() -> float:
             if workflow.in_workflow():
                 return workflow.now().timestamp()
-            return time.time() # Fallback to system time
+            return time.time()
             
         def _deterministic_id_provider() -> str:
             if workflow.in_workflow():
                 return str(workflow.uuid4())
-            return str(uuid.uuid4()) # Fallback to system UUID
+            return str(uuid.uuid4())
 
         runtime.set_time_provider(_deterministic_time_provider)
         runtime.set_id_provider(_deterministic_id_provider)
@@ -123,10 +123,9 @@ class TemporalPlugin(BasePlugin):
             # Convert to positional args for Temporal
             activity_args = list(bound.arguments.values())
             
-            # Strategy: Decorator kwargs are defaults.
+            # Decorator kwargs are defaults.
             options = kwargs.copy()
             
-            # Assert workflow import is available or mocked
             return await workflow.execute_activity(
                 activity_def,
                 *activity_args,
@@ -196,57 +195,27 @@ class TemporalPlugin(BasePlugin):
     async def before_model_callback(
         self, *, callback_context: CallbackContext, llm_request: LlmRequest
     ) -> LlmResponse | None:
-        # If already in a workflow, execute the activity
-        if workflow.in_workflow():
-            # Ensure model is set from agent if missing in request
-            if not llm_request.model:
-                 if isinstance(callback_context.invocation_context.agent.model, str):
-                     llm_request.model = callback_context.invocation_context.agent.model
-                 elif hasattr(callback_context.invocation_context.agent.model, 'model_name'):
-                     llm_request.model = callback_context.invocation_context.agent.model.model_name
-            
-            # Default options
-            options = {
-                "start_to_close_timeout": timedelta(seconds=60),
-                "retry_policy": RetryPolicy(
-                    initial_interval=timedelta(seconds=1),
-                    backoff_coefficient=2.0,
-                    maximum_interval=timedelta(seconds=30),
-                    maximum_attempts=5
-                )
-            }
-            # Merge with user options
-            options.update(self.activity_options)
-            
-            # Execution
-            # The activity returns list[dict] to avoid strict Pydantic validation issues.
-            
-            # Construct dynamic activity name for visibility
-            agent_name = callback_context.agent_name
-            activity_name = f"{agent_name}.generate_content"
-            
-            # Debug options
-            activity.logger.info(f"Executing activity '{activity_name}' with options: {options}")
-            
-            # Execute with dynamic name
-            response_dicts = await workflow.execute_activity(
-                activity_name,
-                args=[llm_request],
-                **options
-            )
-            
-            # Rehydrate LlmResponse objects safely
-            responses = []
-            for d in response_dicts:
-                try:
-                    responses.append(LlmResponse.model_validate(d))
-                except Exception as e:
-                    raise RuntimeError(f"Failed to deserialized LlmResponse from activity result: {e}") from e
+        # Construct dynamic activity name for visibility
+        agent_name = callback_context.agent_name
+        activity_name = f"{agent_name}.generate_content"
 
-            # Simple consolidation: return the last complete response
-            return responses[-1] if responses else None
+        # Execute with dynamic name
+        response_dicts = await workflow.execute_activity(
+            activity_name,
+            args=[llm_request],
+            **self.activity_options
+        )
+        
+        # Rehydrate LlmResponse objects safely
+        responses = []
+        for d in response_dicts:
+            try:
+                responses.append(LlmResponse.model_validate(d))
+            except Exception as e:
+                raise RuntimeError(f"Failed to deserialized LlmResponse from activity result: {e}") from e
 
-        return None
+        # Simple consolidation: return the last complete response
+        return responses[-1] if responses else None
 
 
 
@@ -268,7 +237,6 @@ class AdkWorkerPlugin(SimplePlugin):
 
     def _configure_data_converter(self, converter: DataConverter | None) -> DataConverter:
         if converter is None:
-            # Create a default converter using our PydanticPayloadConverter
             return DataConverter(
                     payload_converter_class=_DefaultPydanticPayloadConverter
             )
