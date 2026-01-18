@@ -96,7 +96,7 @@ class TestTemporalIntegration(unittest.TestCase):
             return f"Hello {arg}"
         
         # Wrap it
-        tool = temporal.TemporalPlugin.activity_tool(
+        tool = temporal.AgentPlugin.activity_tool(
              my_activity,
              start_to_close_timeout=100
         )
@@ -122,7 +122,7 @@ class TestTemporalIntegration(unittest.TestCase):
 
 
     def test_temporal_plugin_before_model(self):
-        plugin = temporal.TemporalPlugin(activity_options={"start_to_close_timeout": 60})
+        plugin = temporal.AgentPlugin(activity_options={"start_to_close_timeout": 60})
         
         # Setup mocks
         mock_workflow.reset_mock()

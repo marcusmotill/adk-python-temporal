@@ -4,9 +4,9 @@ This package provides the integration layer between the Google ADK and Temporal.
 
 ## Core Concepts
 
-### 1. Interception Flow (`TemporalPlugin`)
+### 1. Interception Flow (`AgentPlugin`)
 
-The `TemporalPlugin` acts as a middleware that intercepts model calls (e.g., `agent.generate_content`) *before* they execute.
+The `AgentPlugin` acts as a middleware that intercepts model calls (e.g., `agent.generate_content`) *before* they execute.
 
 **Workflow Interception:**
 1.  **Intercept**: The ADK invokes `before_model_callback` when an agent attempts to call a model.
@@ -32,12 +32,12 @@ When the workflow executes an activity with an unknown name (e.g., `MyAgent.gene
 The integration requires setup on both the Agent (Workflow) side and the Worker side.
 
 #### Agent Setup (Workflow Side)
-Attach the `TemporalPlugin` to your ADK agent. This safely routes model calls through Temporal activities. You **must** provide activity options (e.g., timeouts) as there are no defaults.
+Attach the `AgentPlugin` to your ADK agent. This safely routes model calls through Temporal activities. You **must** provide activity options (e.g., timeouts) as there are no defaults.
 
 ```python
 from datetime import timedelta
 from temporalio.common import RetryPolicy
-from google.adk.integrations.temporal import TemporalPlugin
+from google.adk.integrations.temporal import AgentPlugin
 
 # 1. Define Temporal Activity Options
 activity_options = {
@@ -50,7 +50,7 @@ agent = Agent(
     model="gemini-2.5-pro",
     plugins=[
         # Routes model calls to Temporal Activities
-        TemporalPlugin(activity_options=activity_options)  
+        AgentPlugin(activity_options=activity_options)  
     ]
 )
 
@@ -59,23 +59,23 @@ agent = Agent(
 ```
 
 #### Worker Setup
-Install the `AdkWorkerPlugin` on your Temporal Worker. This handles serialization and runtime determinism.
+Install the `WorkerPlugin` on your Temporal Worker. This handles serialization and runtime determinism.
 
 ```python
 from temporalio.worker import Worker
-from google.adk.integrations.temporal import AdkWorkerPlugin
+from google.adk.integrations.temporal import WorkerPlugin
 
 async def main():
     worker = Worker(
         client,
         task_queue="my-queue",
         # Configures ADK Runtime & Pydantic Support
-        plugins=[AdkWorkerPlugin()]
+        plugins=[WorkerPlugin()]
     )
     await worker.run()
 ```
 
-**What `AdkWorkerPlugin` Does:**
+**What `WorkerPlugin` Does:**
 *   **Data Converter**: Enables Pydantic serialization for ADK objects.
 *   **Interceptors**: Sets up specific ADK runtime hooks for determinism (replacing `time.time`, `uuid.uuid4`) before workflow execution.
 *   TODO: is this enough . **Unsandboxed Workflow Runner**: Configures the worker to use the `UnsandboxedWorkflowRunner`, allowing standard imports in ADK agents.

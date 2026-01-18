@@ -91,7 +91,7 @@ class AdkInterceptor(Interceptor):
     ) -> type[WorkflowInboundInterceptor] | None:
         return AdkWorkflowInboundInterceptor
 
-class TemporalPlugin(BasePlugin):
+class AgentPlugin(BasePlugin):
     """ADK Plugin for Temporal integration.
     
     This plugin automatically configures the ADK runtime to be deterministic when running
@@ -167,7 +167,7 @@ class TemporalPlugin(BasePlugin):
 
 
 
-class AdkWorkerPlugin(SimplePlugin):
+class WorkerPlugin(SimplePlugin):
     """A Temporal Worker Plugin configured for ADK.
     
     This plugin configures:
@@ -192,7 +192,7 @@ class AdkWorkerPlugin(SimplePlugin):
         
         # Check if this is a generate_content call
         if activity_type.endswith(".generate_content") or activity_type == "google.adk.generate_content":
-            return await AdkWorkerPlugin._handle_generate_content(args)
+            return await WorkerPlugin._handle_generate_content(args)
                 
         raise ValueError(f"Unknown dynamic activity: {activity_type}")
 

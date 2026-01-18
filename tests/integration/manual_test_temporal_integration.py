@@ -39,7 +39,7 @@ from google.adk.models import LlmRequest, LlmResponse, LLMRegistry
 from google.adk.sessions import InMemorySessionService
 from google.adk.utils.context_utils import Aclosing
 from google.adk.events import Event
-from google.adk.integrations.temporal import AdkWorkerPlugin, TemporalPlugin
+from google.adk.integrations.temporal import WorkerPlugin, AgentPlugin
 
 # Required Environment Variables for this test:
 # in this folder update .env.example to be .env and have the following vars:
@@ -68,11 +68,11 @@ class WeatherAgent:
         logger.info("Workflow started.")
         
         # 1. Define Agent using Temporal Helpers
-        # Note: TemporalPlugin in the Runner automatically handles Runtime setup
+        # Note: AgentPlugin in the Runner automatically handles Runtime setup
         # and Model Activity interception. We use standard ADK models now.
         
         # Wraps 'get_weather' activity as a Tool
-        weather_tool = TemporalPlugin.activity_tool(
+        weather_tool = AgentPlugin.activity_tool(
             get_weather,
             start_to_close_timeout=timedelta(seconds=60)
         )
@@ -90,12 +90,12 @@ class WeatherAgent:
         
         logger.info(f"Session created with ID: {session.id}")
 
-        # 3. Run Agent with TemporalPlugin
+        # 3. Run Agent with AgentPlugin
         runner = Runner(
             agent=agent,
             app_name='test_app',
             session_service=session_service,
-            plugins=[TemporalPlugin(activity_options={'start_to_close_timeout': timedelta(minutes=2)})]
+            plugins=[AgentPlugin(activity_options={'start_to_close_timeout': timedelta(minutes=2)})]
         )
 
         logger.info("Starting runner.")
@@ -154,7 +154,7 @@ class MultiAgentWorkflow:
             agent=coordinator, 
             app_name="multi_agent_app",
             session_service=session_service,
-            plugins=[TemporalPlugin(activity_options={'start_to_close_timeout': timedelta(minutes=2)})]
+            plugins=[AgentPlugin(activity_options={'start_to_close_timeout': timedelta(minutes=2)})]
         )
         
         # 4. Run
@@ -198,7 +198,7 @@ async def test_temporal_integration():
             get_weather, 
         ],
         workflows=[WeatherAgent, MultiAgentWorkflow],
-        plugins=[AdkWorkerPlugin()]
+        plugins=[WorkerPlugin()]
     ):
         print("Worker started.")
         # Test Weather Agent
