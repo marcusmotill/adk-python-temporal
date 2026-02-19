@@ -29,6 +29,9 @@ import uuid
 import aiosqlite
 from typing_extensions import override
 
+from google.adk.platform import time as platform_time
+from google.adk.platform import uuid as platform_uuid
+
 from . import _session_util
 from ..errors.already_exists_error import AlreadyExistsError
 from ..events.event import Event
@@ -165,8 +168,8 @@ class SqliteSessionService(BaseSessionService):
     if session_id:
       session_id = session_id.strip()
     if not session_id:
-      session_id = str(uuid.uuid4())
-    now = time.time()
+      session_id = platform_uuid.new_uuid()
+    now = platform_time.get_time()
 
     async with self._get_db_connection() as db:
       # Check if session_id already exists

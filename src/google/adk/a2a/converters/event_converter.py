@@ -22,7 +22,8 @@ from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
-import uuid
+
+from google.adk.platform import uuid as platform_uuid
 
 from a2a.server.events import Event as A2AEvent
 from a2a.types import DataPart
@@ -254,7 +255,7 @@ def convert_a2a_task_to_event(
         invocation_id=(
             invocation_context.invocation_id
             if invocation_context
-            else str(uuid.uuid4())
+            else platform_uuid.new_uuid()
         ),
         author=author or "a2a agent",
         branch=invocation_context.branch if invocation_context else None,
@@ -299,7 +300,7 @@ def convert_a2a_message_to_event(
         invocation_id=(
             invocation_context.invocation_id
             if invocation_context
-            else str(uuid.uuid4())
+            else platform_uuid.new_uuid()
         ),
         author=author or "a2a agent",
         branch=invocation_context.branch if invocation_context else None,
@@ -349,7 +350,7 @@ def convert_a2a_message_to_event(
         invocation_id=(
             invocation_context.invocation_id
             if invocation_context
-            else str(uuid.uuid4())
+            else platform_uuid.new_uuid()
         ),
         author=author or "a2a agent",
         branch=invocation_context.branch if invocation_context else None,
@@ -408,7 +409,7 @@ def convert_event_to_a2a_message(
 
     if output_parts:
       return Message(
-          message_id=str(uuid.uuid4()), role=role, parts=output_parts
+          message_id=platform_uuid.new_uuid(), role=role, parts=output_parts
       )
 
   except Exception as e:
@@ -449,7 +450,7 @@ def _create_error_status_event(
       status=TaskStatus(
           state=TaskState.failed,
           message=Message(
-              message_id=str(uuid.uuid4()),
+              message_id=platform_uuid.new_uuid(),
               role=Role.agent,
               parts=[TextPart(text=error_message)],
               metadata={
