@@ -18,7 +18,8 @@ from datetime import datetime
 from typing import Optional
 import uuid
 
-from google.adk import runtime
+from google.adk.platform import time as platform_time
+from google.adk.platform import uuid as platform_uuid
 from google.genai import types
 from pydantic import alias_generators
 from pydantic import ConfigDict
@@ -71,7 +72,7 @@ class Event(LlmResponse):
   # Do not assign the ID. It will be assigned by the session.
   id: str = ''
   """The unique identifier of the event."""
-  timestamp: float = Field(default_factory=lambda: runtime.get_time())
+  timestamp: float = Field(default_factory=lambda: platform_time.get_time())
   """The timestamp of the event."""
 
   def model_post_init(self, __context):
@@ -126,4 +127,4 @@ class Event(LlmResponse):
 
   @staticmethod
   def new_id():
-    return runtime.new_uuid()
+    return platform_uuid.new_uuid()

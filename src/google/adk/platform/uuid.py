@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,25 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Runtime module for abstracting system primitives like time and UUIDs."""
+"""Platform module for abstracting unique ID generation."""
 
-import time
 import uuid
 from typing import Callable
 
-_time_provider: Callable[[], float] = time.time
-_id_provider: Callable[[], str] = lambda: str(uuid.uuid4())
-
-
-def set_time_provider(provider: Callable[[], float]) -> None:
-  """Sets the provider for the current time.
-
-  Args:
-    provider: A callable that returns the current time in seconds since the
-      epoch.
-  """
-  global _time_provider
-  _time_provider = provider
+_default_id_provider: Callable[[], str] = lambda: str(uuid.uuid4())
+_id_provider: Callable[[], str] = _default_id_provider
 
 
 def set_id_provider(provider: Callable[[], str]) -> None:
@@ -43,9 +31,10 @@ def set_id_provider(provider: Callable[[], str]) -> None:
   _id_provider = provider
 
 
-def get_time() -> float:
-  """Returns the current time in seconds since the epoch."""
-  return _time_provider()
+def reset_id_provider() -> None:
+  """Resets the ID provider to its default implementation."""
+  global _id_provider
+  _id_provider = _default_id_provider
 
 
 def new_uuid() -> str:

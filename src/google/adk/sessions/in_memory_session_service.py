@@ -22,7 +22,8 @@ import uuid
 
 from typing_extensions import override
 
-from google.adk import runtime
+from google.adk.platform import time as platform_time
+from google.adk.platform import uuid as platform_uuid
 from . import _session_util
 from ..errors.already_exists_error import AlreadyExistsError
 from ..events.event import Event
@@ -109,14 +110,14 @@ class InMemorySessionService(BaseSessionService):
     session_id = (
         session_id.strip()
         if session_id and session_id.strip()
-        else runtime.new_uuid()
+        else platform_uuid.new_uuid()
     )
     session = Session(
         app_name=app_name,
         user_id=user_id,
         id=session_id,
         state=session_state or {},
-        last_update_time=runtime.get_time(),
+        last_update_time=platform_time.get_time(),
     )
 
     if app_name not in self.sessions:
